@@ -40,6 +40,11 @@ import {
   Skull,
   Brain,
   Scale,
+  FolderHeart,
+  Film,
+  Search,
+  ExternalLink,
+  X,
 } from "lucide-react";
 
 interface TokenUsage {
@@ -61,6 +66,17 @@ interface DraftScript {
   eerie_sound_effect?: string;
   subtitles: { text: string; start_ratio: number; end_ratio: number }[];
   scenes: { scene_number: number; image_prompt: string; motion: string }[];
+}
+
+interface GalleryVideo {
+  id: string;
+  filename: string;
+  videoUrl: string;
+  thumbnailUrl?: string;
+  audioUrl?: string;
+  sizeMB: string;
+  createdAt: string;
+  type: "shorts" | "reviewed" | "studio";
 }
 
 interface LogEntry {
@@ -105,10 +121,10 @@ const DEEP_TOPIC_PRESETS = [
 ];
 
 export default function Home() {
-  const [activeTab, setActiveTab] = useState<"review_studio" | "shorts_quick" | "terminal" | "pricing">("review_studio");
+  const [activeTab, setActiveTab] = useState<"review_studio" | "gallery" | "terminal" | "pricing">("review_studio");
 
   // ==========================================
-  // STATE CHO TAB REVIEW & PHẢN HỒI KỊCH BẢN (MỚI)
+  // STATE CHO TAB REVIEW & PHẢN HỒI KỊCH BẢN
   // ==========================================
   const [deepGenre, setDeepGenre] = useState<"rich_poor" | "psychology" | "philosophy" | "horror">("psychology");
   const [deepTopic, setDeepTopic] = useState<string>(DEEP_TOPIC_PRESETS[1].prompt);
@@ -133,11 +149,36 @@ export default function Home() {
   const [renderedResult, setRenderedResult] = useState<any>(null);
   const [renderError, setRenderError] = useState<string | null>(null);
 
+  // ==========================================
+  // STATE CHO BỘ SƯU TẬP (GALLERY)
+  // ==========================================
+  const [galleryVideos, setGalleryVideos] = useState<GalleryVideo[]>([]);
+  const [galleryLoading, setGalleryLoading] = useState(false);
+  const [selectedVideo, setSelectedVideo] = useState<GalleryVideo | null>(null);
+  const [galleryFilter, setGalleryFilter] = useState<"all" | "reviewed" | "shorts" | "studio">("all");
+  const [gallerySearch, setGallerySearch] = useState("");
+
   // Logs state
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [logFilter, setLogFilter] = useState<string>("ALL");
   const [autoScroll, setAutoScroll] = useState<boolean>(true);
   const terminalEndRef = useRef<HTMLDivElement>(null);
+
+  // Fetch gallery
+  const fetchGallery = async () => {
+    setGalleryLoading(true);
+    try {
+      const res = await fetch("/api/gallery");
+      if (res.ok) {
+        const data = await res.json();
+        setGalleryVideos(data.videos || []);
+      }
+    } catch (e) {
+      // ignore
+    } finally {
+      setGalleryLoading(false);
+    }
+  };
 
   // Poll logs
   const fetchLogs = async () => {
@@ -154,6 +195,7 @@ export default function Home() {
 
   useEffect(() => {
     fetchLogs();
+    fetchGallery();
     const interval = setInterval(fetchLogs, isDrafting || isRevising || isRenderingVideo ? 1500 : 3000);
     return () => clearInterval(interval);
   }, [isDrafting, isRevising, isRenderingVideo]);
@@ -168,6 +210,21 @@ export default function Home() {
     try {
       await fetch("/api/logs", { method: "DELETE" });
       setLogs([]);
+    } catch (e) {
+      // ignore
+    }
+  };
+
+  const handleDeleteVideo = async (filename: string) => {
+    if (!confirm(`Bạn có chắc muốn xóa video: ${filename} không?`)) return;
+    try {
+      const res = await fetch(`/api/gallery?filename=${encodeURIComponent(filename)}`, {
+        method: "DELETE",
+      });
+      if (res.ok) {
+        fetchGallery();
+        if (selectedVideo?.filename === filename) setSelectedVideo(null);
+      }
     } catch (e) {
       // ignore
     }
@@ -191,7 +248,7 @@ export default function Home() {
           topic: deepTopic,
           genre: deepGenre,
           targetDuration,
-          scenesCount: 1, // 1 cảnh để tiết kiệm chi phí DALL-E tối đa
+          scenesCount: 1,
         }),
       });
 
@@ -298,6 +355,7 @@ export default function Home() {
 
       setRenderedResult(data);
       fetchLogs();
+      fetchGallery(); // Tự động cập nhật bộ sưu tập
     } catch (err: any) {
       setRenderError(err.message || "Lỗi khi render video.");
     } finally {
@@ -310,6 +368,14 @@ export default function Home() {
   const filteredLogs = logs.filter((l) => {
     if (logFilter === "ALL") return true;
     return l.module === logFilter;
+  });
+
+  const filteredGallery = galleryVideos.filter((v) => {
+    if (galleryFilter !== "all" && v.type !== galleryFilter) return false;
+    if (gallerySearch && !v.filename.toLowerCase().includes(gallerySearch.toLowerCase()) && !v.id.includes(gallerySearch)) {
+      return false;
+    }
+    return true;
   });
 
   return (
@@ -349,12 +415,32 @@ export default function Home() {
               }`}
             >
               <Skull className="w-4 h-4 text-red-400" />
-              <span>Review Kịch Bản & Mặt Tối</span>
+              <span>Review Kịch Bản & Tạo Video</span>
               <span className="px-1.5 py-0.5 rounded-full bg-red-500/20 text-red-300 text-[10px] font-bold">
                 ƯU TIÊN
               </span>
             </button>
 
+            {/* TAB BỘ SƯU TẬP (MỚI) */}
+            <button
+              onClick={() => {
+                setActiveTab("gallery");
+                fetchGallery();
+              }}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-all relative ${
+                activeTab === "gallery"
+                  ? "bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-md shadow-blue-900/40"
+                  : "text-slate-400 hover:text-white hover:bg-slate-800/50"
+              }`}
+            >
+              <FolderHeart className="w-4 h-4 text-blue-400" />
+              <span>Bộ Sưu Tập (Outputs)</span>
+              <span className="px-1.5 py-0.5 rounded-full bg-blue-500/20 text-blue-300 text-[10px] font-mono font-bold">
+                {galleryVideos.length}
+              </span>
+            </button>
+
+            {/* TAB NHẬT KÝ CMD */}
             <button
               onClick={() => setActiveTab("terminal")}
               className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold transition-all relative ${
@@ -373,6 +459,7 @@ export default function Home() {
               )}
             </button>
 
+            {/* TAB CHI PHÍ */}
             <button
               onClick={() => setActiveTab("pricing")}
               className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold transition-all ${
@@ -388,13 +475,12 @@ export default function Home() {
         </header>
 
         {/* ======================================================== */}
-        {/* TAB CHÍNH: REVIEW KỊCH BẢN & MẶT TỐI (THEO YÊU CẦU NGƯỜI DÙNG) */}
+        {/* TAB 1: REVIEW KỊCH BẢN & MẶT TỐI */}
         {/* ======================================================== */}
         {activeTab === "review_studio" && (
           <div className="space-y-8">
             {/* GIAI ĐOẠN 1: NHẬP Ý TƯỞNG & CHỌN THỂ LOẠI */}
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-              {/* Cột trái: Cấu hình ý tưởng */}
               <div className="lg:col-span-6 bg-slate-900/60 backdrop-blur-md rounded-2xl p-6 border border-slate-800/80 shadow-xl space-y-5">
                 <div className="flex items-center justify-between pb-3 border-b border-slate-800">
                   <div className="flex items-center gap-2 text-sm font-bold text-white">
@@ -408,7 +494,6 @@ export default function Home() {
                   </span>
                 </div>
 
-                {/* Thể loại chuyên sâu */}
                 <div className="grid grid-cols-2 gap-2.5">
                   <button
                     type="button"
@@ -479,10 +564,9 @@ export default function Home() {
                   </button>
                 </div>
 
-                {/* Textarea nhập ý tưởng */}
                 <div className="space-y-1.5">
                   <label className="text-xs font-semibold uppercase tracking-wider text-slate-400 flex items-center justify-between">
-                    <span>Ý tưởng của bạn (hoặc chọn gợi ý mẫu bên phải)</span>
+                    <span>Ý tưởng của bạn (hoặc chọn cốt truyện mẫu)</span>
                   </label>
                   <textarea
                     value={deepTopic}
@@ -493,10 +577,9 @@ export default function Home() {
                   />
                 </div>
 
-                {/* Tùy chọn thời lượng (Không bị ràng buộc) */}
                 <div className="space-y-1.5">
                   <label className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-                    Thời lượng dự kiến (Không bị gò bó)
+                    Thời lượng dự kiến (Không bị ràng buộc)
                   </label>
                   <div className="grid grid-cols-3 gap-2">
                     <button
@@ -542,7 +625,6 @@ export default function Home() {
                   </div>
                 )}
 
-                {/* Nút lên kịch bản nháp */}
                 <button
                   type="button"
                   onClick={handleDraftScript}
@@ -563,7 +645,7 @@ export default function Home() {
                 </button>
               </div>
 
-              {/* Cột phải: Các mẫu cốt truyện có sẵn để bấm chọn nhanh */}
+              {/* Cột phải: Các mẫu cốt truyện có sẵn */}
               <div className="lg:col-span-6 bg-slate-900/40 rounded-2xl p-6 border border-slate-800/80 space-y-4">
                 <div className="text-xs font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-2">
                   <Flame className="w-3.5 h-3.5 text-yellow-400" />
@@ -605,7 +687,7 @@ export default function Home() {
               </div>
             </div>
 
-            {/* GIAI ĐOẠN 2: BẢNG REVIEW KỊCH BẢN & VIẾT FEEDBACK TẠO LẠI (LIVE REVIEW PANEL) */}
+            {/* GIAI ĐOẠN 2: BẢNG REVIEW KỊCH BẢN & VIẾT FEEDBACK TẠO LẠI */}
             {draftScript && (
               <div className="bg-slate-900/90 rounded-2xl p-6 border-2 border-red-500/50 shadow-2xl space-y-6">
                 <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 pb-4 border-b border-slate-800">
@@ -628,7 +710,6 @@ export default function Home() {
                   </div>
                 </div>
 
-                {/* Hook mở đầu 3s */}
                 <div className="p-3.5 bg-red-950/30 border border-red-500/30 rounded-xl space-y-1">
                   <div className="text-[11px] font-bold text-red-400 uppercase tracking-wider flex items-center gap-1.5">
                     <Flame className="w-3.5 h-3.5 text-yellow-400" /> Hook 3 giây đầu (Gây tò mò / Rùng rợn):
@@ -638,11 +719,10 @@ export default function Home() {
                   </div>
                 </div>
 
-                {/* Ô chỉnh sửa trực tiếp lời thoại */}
                 <div className="space-y-2">
                   <label className="text-xs font-semibold uppercase tracking-wider text-slate-300 flex items-center justify-between">
                     <span className="flex items-center gap-1.5 text-amber-400">
-                      <Edit3 className="w-3.5 h-3.5" /> Lời thoại lồng tiếng (Bạn có thể bấm vào để tự gõ sửa trực tiếp):
+                      <Edit3 className="w-3.5 h-3.5" /> Lời thoại lồng tiếng (Bấm vào để tự gõ chỉnh sửa trực tiếp):
                     </span>
                     <span className="text-[11px] text-slate-500 font-normal">Chỉnh sửa tự do</span>
                   </label>
@@ -654,7 +734,6 @@ export default function Home() {
                   />
                 </div>
 
-                {/* Phân cảnh & Phụ đề xem trước */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="p-4 bg-slate-950/70 rounded-xl border border-slate-800 space-y-2">
                     <div className="text-xs font-semibold text-slate-400 uppercase flex items-center gap-1.5">
@@ -679,7 +758,6 @@ export default function Home() {
                   </div>
                 </div>
 
-                {/* Hộp Feedback để AI sửa lại kịch bản */}
                 <div className="p-4 bg-slate-950/90 rounded-xl border border-purple-500/30 space-y-3">
                   <label className="text-xs font-semibold uppercase tracking-wider text-purple-300 flex items-center gap-1.5">
                     <MessageSquareText className="w-3.5 h-3.5 text-purple-400" /> Bạn muốn AI viết lại? Nhập Feedback tại đây:
@@ -716,7 +794,6 @@ export default function Home() {
                 {/* TÙY CHỌN HIỆU ỨNG ÂM THANH KỲ DỊ & DUYỆT SẢN XUẤT */}
                 <div className="pt-4 border-t border-slate-800 space-y-4">
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    {/* Hiệu ứng âm thanh kỳ dị (Audio Effect TikTok) */}
                     <div className="space-y-1.5">
                       <label className="text-xs font-semibold uppercase text-slate-400 flex items-center gap-1.5">
                         <Radio className="w-3.5 h-3.5 text-red-400" /> Hiệu ứng âm thanh kỳ dị TikTok
@@ -732,7 +809,6 @@ export default function Home() {
                       </select>
                     </div>
 
-                    {/* Giọng đọc */}
                     <div className="space-y-1.5">
                       <label className="text-xs font-semibold uppercase text-slate-400 flex items-center gap-1.5">
                         <Volume2 className="w-3.5 h-3.5 text-purple-400" /> Giọng đọc lồng tiếng
@@ -747,7 +823,6 @@ export default function Home() {
                       </select>
                     </div>
 
-                    {/* Màu phụ đề TikTok */}
                     <div className="space-y-1.5">
                       <label className="text-xs font-semibold uppercase text-slate-400 flex items-center gap-1.5">
                         <Subtitles className="w-3.5 h-3.5 text-yellow-400" /> Màu phụ đề khắc lên video
@@ -771,7 +846,6 @@ export default function Home() {
                     </div>
                   )}
 
-                  {/* NÚT DUYỆT & SẢN XUẤT VIDEO */}
                   <button
                     type="button"
                     onClick={handleApproveAndRender}
@@ -902,7 +976,281 @@ export default function Home() {
           </div>
         )}
 
-        {/* TAB 2: TERMINAL / CMD LOGS */}
+        {/* ======================================================== */}
+        {/* TAB 2: BỘ SƯU TẬP VIDEO (GALLERY TRONG OUTPUTS) - MỚI */}
+        {/* ======================================================== */}
+        {activeTab === "gallery" && (
+          <div className="space-y-6">
+            {/* Gallery Top Bar */}
+            <div className="bg-slate-900/60 backdrop-blur-md rounded-2xl p-6 border border-slate-800 shadow-xl space-y-4">
+              <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                <div>
+                  <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                    <FolderHeart className="w-5 h-5 text-blue-400" />
+                    Bộ Sưu Tập Video Đã Tạo ({galleryVideos.length})
+                  </h2>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Quản lý toàn bộ video thành phẩm lưu trong thư mục <code className="text-blue-300 font-mono">public/outputs/</code>.
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={fetchGallery}
+                  disabled={galleryLoading}
+                  className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 transition-all flex items-center gap-2"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${galleryLoading ? "animate-spin" : ""}`} />
+                  <span>Làm mới bộ sưu tập</span>
+                </button>
+              </div>
+
+              {/* Filter and Search */}
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-3 border-t border-slate-800">
+                <div className="flex items-center gap-1.5 bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => setGalleryFilter("all")}
+                    className={`px-3 py-1 rounded-lg transition-all ${
+                      galleryFilter === "all" ? "bg-blue-600 text-white font-semibold" : "text-slate-400 hover:text-white"
+                    }`}
+                  >
+                    Tất cả ({galleryVideos.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setGalleryFilter("reviewed")}
+                    className={`px-3 py-1 rounded-lg transition-all ${
+                      galleryFilter === "reviewed" ? "bg-red-600 text-white font-semibold" : "text-slate-400 hover:text-white"
+                    }`}
+                  >
+                    Review Mặt Tối ({galleryVideos.filter((v) => v.type === "reviewed").length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setGalleryFilter("shorts")}
+                    className={`px-3 py-1 rounded-lg transition-all ${
+                      galleryFilter === "shorts" ? "bg-pink-600 text-white font-semibold" : "text-slate-400 hover:text-white"
+                    }`}
+                  >
+                    Shorts & TikTok ({galleryVideos.filter((v) => v.type === "shorts").length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setGalleryFilter("studio")}
+                    className={`px-3 py-1 rounded-lg transition-all ${
+                      galleryFilter === "studio" ? "bg-purple-600 text-white font-semibold" : "text-slate-400 hover:text-white"
+                    }`}
+                  >
+                    Studio ({galleryVideos.filter((v) => v.type === "studio").length})
+                  </button>
+                </div>
+
+                <div className="relative w-full sm:w-64">
+                  <Search className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-3" />
+                  <input
+                    type="text"
+                    value={gallerySearch}
+                    onChange={(e) => setGallerySearch(e.target.value)}
+                    placeholder="Tìm theo mã ID hoặc tên..."
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-8 pr-3 py-1.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Video Grid */}
+            {filteredGallery.length === 0 ? (
+              <div className="bg-slate-900/40 rounded-2xl p-16 border border-slate-800 text-center space-y-3">
+                <Film className="w-12 h-12 text-slate-600 mx-auto" />
+                <h3 className="text-base font-semibold text-slate-300">Chưa có video nào trong mục này</h3>
+                <p className="text-xs text-slate-500 max-w-sm mx-auto">
+                  Hãy quay lại tab &quot;Review Kịch Bản &amp; Tạo Video&quot; để tạo video đầu tiên của bạn.
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
+                {filteredGallery.map((video) => (
+                  <div
+                    key={video.filename}
+                    className="bg-slate-900/80 rounded-2xl border border-slate-800 overflow-hidden shadow-lg hover:border-blue-500/50 transition-all flex flex-col group"
+                  >
+                    {/* Thumbnail / Video Preview Area */}
+                    <div
+                      onClick={() => setSelectedVideo(video)}
+                      className="relative h-64 bg-black cursor-pointer overflow-hidden flex items-center justify-center"
+                    >
+                      {video.thumbnailUrl ? (
+                        <img
+                          src={video.thumbnailUrl}
+                          alt={video.filename}
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                        />
+                      ) : (
+                        <video
+                          src={video.videoUrl}
+                          className="w-full h-full object-cover"
+                          muted
+                        />
+                      )}
+
+                      {/* Play overlay button */}
+                      <div className="absolute inset-0 bg-black/40 group-hover:bg-black/20 flex items-center justify-center transition-all">
+                        <div className="w-12 h-12 rounded-full bg-white/20 backdrop-blur-md border border-white/40 flex items-center justify-center text-white group-hover:scale-110 group-hover:bg-blue-600 transition-all shadow-xl">
+                          <Play className="w-5 h-5 fill-current ml-0.5" />
+                        </div>
+                      </div>
+
+                      {/* Badge thể loại */}
+                      <div className="absolute top-2.5 left-2.5">
+                        {video.type === "reviewed" && (
+                          <span className="px-2 py-0.5 rounded-md bg-red-600/90 text-white text-[10px] font-bold shadow-md">
+                            🎭 Review Mặt Tối
+                          </span>
+                        )}
+                        {video.type === "shorts" && (
+                          <span className="px-2 py-0.5 rounded-md bg-pink-600/90 text-white text-[10px] font-bold shadow-md">
+                            🔥 Shorts TikTok
+                          </span>
+                        )}
+                        {video.type === "studio" && (
+                          <span className="px-2 py-0.5 rounded-md bg-purple-600/90 text-white text-[10px] font-bold shadow-md">
+                            🎬 Studio
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Dung lượng file */}
+                      <span className="absolute bottom-2.5 right-2.5 bg-black/80 px-2 py-0.5 rounded text-[10px] text-slate-300 font-mono">
+                        {video.sizeMB}
+                      </span>
+                    </div>
+
+                    {/* Metadata & Actions */}
+                    <div className="p-4 space-y-3 flex-1 flex flex-col justify-between">
+                      <div>
+                        <div className="text-xs font-semibold text-slate-200 truncate" title={video.filename}>
+                          {video.filename}
+                        </div>
+                        <div className="text-[11px] text-slate-500 mt-1 flex items-center gap-1.5">
+                          <Clock className="w-3 h-3" />
+                          <span>{video.createdAt}</span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 pt-2 border-t border-slate-800/80">
+                        <button
+                          type="button"
+                          onClick={() => setSelectedVideo(video)}
+                          className="flex-1 py-1.5 px-3 rounded-lg bg-blue-600/20 hover:bg-blue-600 text-blue-300 hover:text-white text-xs font-semibold transition-all flex items-center justify-center gap-1.5"
+                        >
+                          <Play className="w-3.5 h-3.5" />
+                          <span>Xem</span>
+                        </button>
+
+                        <a
+                          href={video.videoUrl}
+                          download={video.filename}
+                          className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition-all"
+                          title="Tải video MP4"
+                        >
+                          <Download className="w-4 h-4" />
+                        </a>
+
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteVideo(video.filename)}
+                          className="p-1.5 rounded-lg bg-slate-800 hover:bg-red-950 hover:text-red-400 text-slate-400 transition-all"
+                          title="Xóa video này"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* MODAL PHÁT VIDEO CHI TIẾT */}
+            {selectedVideo && (
+              <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-2xl w-full overflow-hidden shadow-2xl space-y-4 p-5 animate-in fade-in zoom-in-95">
+                  <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+                    <div>
+                      <h3 className="text-base font-bold text-white truncate max-w-md">
+                        {selectedVideo.filename}
+                      </h3>
+                      <div className="text-xs text-slate-400 mt-0.5">
+                        Ngày tạo: {selectedVideo.createdAt} • Dung lượng: {selectedVideo.sizeMB}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedVideo(null)}
+                      className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white"
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+                  </div>
+
+                  {/* Video Player */}
+                  <div className="relative bg-black rounded-xl overflow-hidden flex items-center justify-center max-h-[500px]">
+                    <video
+                      src={selectedVideo.videoUrl}
+                      controls
+                      autoPlay
+                      loop
+                      className="max-h-[500px] w-auto mx-auto rounded-lg shadow-2xl"
+                    />
+                  </div>
+
+                  {/* Audio riêng nếu có */}
+                  {selectedVideo.audioUrl && (
+                    <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 flex items-center justify-between">
+                      <span className="text-xs text-slate-400 flex items-center gap-1.5">
+                        <Volume2 className="w-4 h-4 text-purple-400" /> Nghe file âm thanh riêng:
+                      </span>
+                      <audio src={selectedVideo.audioUrl} controls className="h-7 w-48 scale-90" />
+                    </div>
+                  )}
+
+                  {/* Modal Footer */}
+                  <div className="flex items-center justify-between pt-2 border-t border-slate-800">
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteVideo(selectedVideo.filename)}
+                      className="px-3 py-1.5 rounded-lg text-xs text-red-400 hover:bg-red-950/40 border border-red-500/20 flex items-center gap-1.5"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" /> Xóa video
+                    </button>
+
+                    <div className="flex items-center gap-2">
+                      <a
+                        href={selectedVideo.videoUrl}
+                        download={selectedVideo.filename}
+                        className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold flex items-center gap-1.5 shadow-md"
+                      >
+                        <Download className="w-4 h-4" /> Tải về máy (.MP4)
+                      </a>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedVideo(null)}
+                        className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold"
+                      >
+                        Đóng
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ======================================================== */}
+        {/* TAB 3: TERMINAL / CMD LOGS */}
+        {/* ======================================================== */}
         {activeTab === "terminal" && (
           <div className="bg-slate-950 rounded-2xl border border-slate-800 shadow-2xl overflow-hidden font-mono">
             <div className="flex items-center justify-between px-4 py-3 bg-slate-900/90 border-b border-slate-800">
@@ -1005,7 +1353,9 @@ export default function Home() {
           </div>
         )}
 
-        {/* TAB 3: PRICING & TOKEN BREAKDOWN */}
+        {/* ======================================================== */}
+        {/* TAB 4: PRICING & TOKEN BREAKDOWN */}
+        {/* ======================================================== */}
         {activeTab === "pricing" && (
           <div className="bg-slate-900/60 backdrop-blur-md rounded-2xl p-6 md:p-8 border border-slate-800 shadow-xl space-y-8">
             <div>
