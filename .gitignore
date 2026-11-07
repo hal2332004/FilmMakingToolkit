@@ -1,0 +1,31 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Testing
+coverage/
+
+# Next.js
+.next/
+out/
+build/
+dist/
+
+# Outputs generated
+public/outputs/*
+!public/outputs/.gitkeep
+
+# Secrets
+.env
+.env*.local
+.env.*
+
+# Python / notebook runtime
+__pycache__/
+
+# OS & IDE
+.DS_Store
+*.pem
+.vscode/
+.idea/
