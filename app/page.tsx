@@ -57,12 +57,26 @@ interface TokenUsage {
   total_estimated_usd: string;
 }
 
+interface TimelineSegment {
+  time_range: string;
+  stage: string;
+  acting_cue: string;
+  spoken_text: string;
+  subtitle: string;
+  visual_description: string;
+  cinematic_prompt: string;
+}
+
 interface DraftScript {
   title: string;
   hook: string;
   voiceover: string;
+  voiceover_with_cues?: string;
   word_count: number;
   estimated_seconds: number;
+  target_seconds?: number;
+  core_message?: string;
+  timeline?: TimelineSegment[];
   eerie_sound_effect?: string;
   subtitles: { text: string; start_ratio: number; end_ratio: number }[];
   scenes: { scene_number: number; image_prompt: string; motion: string }[];
@@ -128,7 +142,7 @@ export default function Home() {
   // ==========================================
   const [deepGenre, setDeepGenre] = useState<"rich_poor" | "psychology" | "philosophy" | "horror">("psychology");
   const [deepTopic, setDeepTopic] = useState<string>(DEEP_TOPIC_PRESETS[1].prompt);
-  const [targetDuration, setTargetDuration] = useState<"short" | "medium" | "flexible">("short");
+  const [targetSeconds, setTargetSeconds] = useState<number>(15);
   const [isDrafting, setIsDrafting] = useState(false);
   const [draftError, setDraftError] = useState<string | null>(null);
 
@@ -137,6 +151,7 @@ export default function Home() {
   const [userEditedVoiceover, setUserEditedVoiceover] = useState<string>("");
   const [feedbackPrompt, setFeedbackPrompt] = useState<string>("");
   const [isRevising, setIsRevising] = useState(false);
+  const [showVoiceoverWithCues, setShowVoiceoverWithCues] = useState<boolean>(false);
 
   // Cấu hình âm thanh & dựng video
   const [audioEffect, setAudioEffect] = useState<"eerie_dark" | "creepy_reverb" | "none">("eerie_dark");
@@ -247,8 +262,7 @@ export default function Home() {
         body: JSON.stringify({
           topic: deepTopic,
           genre: deepGenre,
-          targetDuration,
-          scenesCount: 1,
+          targetSeconds,
         }),
       });
 
@@ -285,8 +299,7 @@ export default function Home() {
         body: JSON.stringify({
           topic: deepTopic,
           genre: deepGenre,
-          targetDuration,
-          scenesCount: 1,
+          targetSeconds,
           feedback: feedbackPrompt,
           currentScript: {
             ...draftScript,
@@ -327,20 +340,37 @@ export default function Home() {
     }, 7000);
 
     try {
+      // Ưu tiên prompt hình ảnh điện ảnh từ phân cảnh chính hoặc timeline
+      const primaryScenePrompt =
+        draftScript?.scenes?.[0]?.image_prompt ||
+        draftScript?.timeline?.[0]?.cinematic_prompt ||
+        `A dark moody cinematic chiaroscuro scene depicting: ${deepTopic}, psychological thriller atmosphere, 8k vertical 9:16`;
+
+      // Chuẩn bị phụ đề: ưu tiên từ subtitles hoặc từ timeline
+      let subs = draftScript?.subtitles || [];
+      if ((!subs || subs.length === 0) && draftScript?.timeline && draftScript.timeline.length > 0) {
+        const segs = draftScript.timeline;
+        subs = segs.map((item, idx) => ({
+          text: item.subtitle || item.spoken_text?.substring(0, 45)?.toUpperCase() || "PHỤ ĐỀ",
+          start_ratio: idx / segs.length,
+          end_ratio: (idx + 1) / segs.length,
+        }));
+      }
+
       const res = await fetch("/api/render-reviewed-script", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           title: draftScript?.title || "Video Đạo Lý",
           voiceover: userEditedVoiceover,
-          scenes: draftScript?.scenes || [
+          scenes: [
             {
               scene_number: 1,
-              image_prompt: `A dark moody cinematic chiaroscuro scene depicting: ${deepTopic}, psychological thriller atmosphere, 8k vertical 9:16`,
+              image_prompt: primaryScenePrompt,
               motion: "zoom-in",
             },
           ],
-          subtitles: draftScript?.subtitles || [],
+          subtitles: subs,
           audioEffect,
           voiceProvider: "openai",
           openaiVoice: voiceChoice,
@@ -577,45 +607,66 @@ export default function Home() {
                   />
                 </div>
 
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-                    Thời lượng dự kiến (Không bị ràng buộc)
-                  </label>
-                  <div className="grid grid-cols-3 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setTargetDuration("short")}
-                      className={`p-2 rounded-lg text-xs border text-center transition-all ${
-                        targetDuration === "short"
-                          ? "bg-red-600/20 border-red-500 text-red-200 font-semibold"
-                          : "bg-slate-950/40 border-slate-800 text-slate-400"
-                      }`}
-                    >
-                      Ngắn (~8-10s)
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setTargetDuration("medium")}
-                      className={`p-2 rounded-lg text-xs border text-center transition-all ${
-                        targetDuration === "medium"
-                          ? "bg-red-600/20 border-red-500 text-red-200 font-semibold"
-                          : "bg-slate-950/40 border-slate-800 text-slate-400"
-                      }`}
-                    >
-                      Vừa (~15-18s)
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setTargetDuration("flexible")}
-                      className={`p-2 rounded-lg text-xs border text-center transition-all ${
-                        targetDuration === "flexible"
-                          ? "bg-red-600/20 border-red-500 text-red-200 font-semibold"
-                          : "bg-slate-950/40 border-slate-800 text-slate-400"
-                      }`}
-                    >
-                      Tự nhiên theo truyện
-                    </button>
+                {/* Thời lượng dự kiến: Điền số giây tùy ý hoặc chọn nhanh */}
+                <div className="space-y-2 bg-slate-950/60 p-3.5 rounded-xl border border-slate-800">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-semibold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
+                      <Clock className="w-3.5 h-3.5 text-yellow-400" />
+                      <span>Thời lượng xác định (Điền số giây tùy ý)</span>
+                    </label>
+                    <span className="text-[11px] text-amber-400 font-mono font-bold">
+                      {targetSeconds}s (~{Math.round(targetSeconds * 2.55)} từ)
+                    </span>
                   </div>
+
+                  {/* Nút bấm nhanh các mốc thời lượng phổ biến */}
+                  <div className="grid grid-cols-6 gap-1.5">
+                    {[10, 15, 20, 30, 45, 60].map((sec) => (
+                      <button
+                        key={sec}
+                        type="button"
+                        onClick={() => setTargetSeconds(sec)}
+                        className={`py-1.5 px-2 rounded-lg text-xs font-mono font-bold border transition-all ${
+                          targetSeconds === sec
+                            ? "bg-red-600/30 border-red-500 text-red-200 shadow-sm"
+                            : "bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700 hover:text-slate-200"
+                        }`}
+                      >
+                        {sec}s
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Ô nhập số giây tùy chỉnh tự do */}
+                  <div className="flex items-center gap-2 pt-1">
+                    <div className="relative flex-1">
+                      <input
+                        type="number"
+                        min={6}
+                        max={90}
+                        value={targetSeconds}
+                        onChange={(e) => {
+                          const val = Number(e.target.value);
+                          if (val > 0) setTargetSeconds(Math.min(90, Math.max(6, val)));
+                        }}
+                        className="w-full bg-slate-900 border border-slate-700/80 rounded-xl px-3.5 py-2 text-xs text-white font-mono placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-red-500"
+                        placeholder="Điền số giây (VD: 12, 18, 25, 40...)"
+                      />
+                      <span className="absolute right-3 top-2 text-xs text-slate-400 font-mono">
+                        giây
+                      </span>
+                    </div>
+
+                    <div className="text-[11px] text-slate-300 bg-slate-900 px-3 py-2 rounded-xl border border-slate-800 flex items-center gap-1.5">
+                      <span>🎬 Số phân cảnh:</span>
+                      <strong className="text-amber-400 font-mono">
+                        {targetSeconds <= 12 ? 2 : targetSeconds <= 25 ? 3 : 4} cảnh
+                      </strong>
+                    </div>
+                  </div>
+                  <p className="text-[11px] text-slate-400 leading-relaxed italic">
+                    💡 AI sẽ căn chỉnh kịch bản cực kỳ chi tiết cho đúng <strong>{targetSeconds} giây</strong> (khoảng {Math.round(targetSeconds * 2.3)} - {Math.round(targetSeconds * 2.85)} từ), phân cảnh rõ ràng từng nhịp.
+                  </p>
                 </div>
 
                 {draftError && (
@@ -692,7 +743,7 @@ export default function Home() {
               <div className="bg-slate-900/90 rounded-2xl p-6 border-2 border-red-500/50 shadow-2xl space-y-6">
                 <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 pb-4 border-b border-slate-800">
                   <div className="flex items-center gap-3">
-                    <span className="w-7 h-7 rounded-full bg-red-600 text-white font-bold flex items-center justify-center text-sm">
+                    <span className="w-7 h-7 rounded-full bg-red-600 text-white font-bold flex items-center justify-center text-sm shadow-md">
                       2
                     </span>
                     <div>
@@ -700,37 +751,160 @@ export default function Home() {
                         Bảng Review Kịch Bản: &quot;{draftScript.title}&quot;
                       </h2>
                       <p className="text-xs text-slate-400">
-                        Bạn có thể <strong>sửa trực tiếp từng chữ</strong> trong ô lời thoại, hoặc <strong>gõ feedback</strong> để AI viết lại.
+                        Kịch bản được thiết kế chi tiết cho thời lượng <strong>{draftScript.target_seconds || targetSeconds} giây</strong>. Bạn có thể sửa trực tiếp từng chữ hoặc yêu cầu AI viết lại.
                       </p>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2 text-xs text-slate-300 bg-slate-950 px-3 py-1.5 rounded-lg border border-slate-800 font-mono">
-                    <Clock className="w-3.5 h-3.5 text-yellow-400" />
-                    <span>Ước tính: ~{draftScript.estimated_seconds} giây ({draftScript.word_count} từ)</span>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="flex items-center gap-1.5 text-xs text-slate-200 bg-slate-950 px-3 py-1.5 rounded-lg border border-slate-800 font-mono">
+                      <Clock className="w-3.5 h-3.5 text-yellow-400" />
+                      <span>Thời lượng: <strong>{draftScript.target_seconds || draftScript.estimated_seconds}s</strong></span>
+                    </div>
+                    <div className="flex items-center gap-1.5 text-xs text-slate-200 bg-slate-950 px-3 py-1.5 rounded-lg border border-slate-800 font-mono">
+                      <Edit3 className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>{draftScript.word_count} từ</span>
+                    </div>
                   </div>
                 </div>
 
-                <div className="p-3.5 bg-red-950/30 border border-red-500/30 rounded-xl space-y-1">
-                  <div className="text-[11px] font-bold text-red-400 uppercase tracking-wider flex items-center gap-1.5">
-                    <Flame className="w-3.5 h-3.5 text-yellow-400" /> Hook 3 giây đầu (Gây tò mò / Rùng rợn):
+                {/* Thông điệp cốt lõi & Hook 3s đầu */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div className="p-3.5 bg-red-950/30 border border-red-500/30 rounded-xl space-y-1">
+                    <div className="text-[11px] font-bold text-red-400 uppercase tracking-wider flex items-center gap-1.5">
+                      <Flame className="w-3.5 h-3.5 text-yellow-400" /> Hook 3 giây đầu (Gây tò mò / Lạnh gáy):
+                    </div>
+                    <div className="text-sm font-semibold text-white">
+                      &quot;{draftScript.hook}&quot;
+                    </div>
                   </div>
-                  <div className="text-sm font-semibold text-white">
-                    &quot;{draftScript.hook}&quot;
-                  </div>
+
+                  {draftScript.core_message && (
+                    <div className="p-3.5 bg-purple-950/30 border border-purple-500/30 rounded-xl space-y-1">
+                      <div className="text-[11px] font-bold text-purple-400 uppercase tracking-wider flex items-center gap-1.5">
+                        <Brain className="w-3.5 h-3.5 text-purple-400" /> Thông điệp cốt lõi (Sự thật trần trụi):
+                      </div>
+                      <div className="text-sm font-medium text-slate-200 italic">
+                        &quot;{draftScript.core_message}&quot;
+                      </div>
+                    </div>
+                  )}
                 </div>
 
+                {/* BẢNG PHÂN CẢNH TIMELINE CHI TIẾT THEO THỜI LƯỢNG (CHỐNG ĐƠN ĐIỆU) */}
+                {draftScript.timeline && draftScript.timeline.length > 0 && (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between pb-1 border-b border-slate-800/80">
+                      <div className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-2">
+                        <Layers className="w-4 h-4 text-amber-400" />
+                        <span>Timeline Phân Cảnh Chi Tiết ({draftScript.timeline.length} phân đoạn khớp từng giây)</span>
+                      </div>
+                      <span className="text-[10px] text-slate-500 bg-slate-950 px-2 py-0.5 rounded border border-slate-800">
+                        Chỉ đạo đạo diễn & diễn cảm
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-3">
+                      {draftScript.timeline.map((item, idx) => (
+                        <div
+                          key={idx}
+                          className="bg-slate-950/80 border border-slate-800 rounded-xl p-4 space-y-2.5 transition-all hover:border-slate-700"
+                        >
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div className="flex items-center gap-2">
+                              <span className="px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 text-xs font-mono font-bold border border-amber-500/30 flex items-center gap-1">
+                                <Clock className="w-3 h-3" />
+                                {item.time_range}
+                              </span>
+                              <span className={`text-[11px] font-bold px-2 py-0.5 rounded border ${
+                                item.stage?.includes("HOOK")
+                                  ? "bg-red-500/20 text-red-300 border-red-500/30"
+                                  : item.stage?.includes("TWIST") || item.stage?.includes("LẬT")
+                                  ? "bg-purple-500/20 text-purple-300 border-purple-500/30"
+                                  : item.stage?.includes("PUNCHLINE") || item.stage?.includes("TRIẾT LÝ")
+                                  ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/30"
+                                  : "bg-blue-500/20 text-blue-300 border-blue-500/30"
+                              }`}>
+                                {item.stage}
+                              </span>
+                            </div>
+
+                            {item.acting_cue && (
+                              <span className="text-xs text-amber-300/90 italic bg-amber-950/30 px-2.5 py-0.5 rounded border border-amber-500/20">
+                                🎭 {item.acting_cue}
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="grid grid-cols-1 md:grid-cols-12 gap-3 pt-1">
+                            <div className="md:col-span-7 space-y-1.5">
+                              <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                                Lời thoại phân đoạn:
+                              </div>
+                              <p className="text-xs text-white leading-relaxed bg-slate-900/90 p-2.5 rounded-lg border border-slate-800 font-sans">
+                                &quot;{item.spoken_text}&quot;
+                              </p>
+                              {item.subtitle && (
+                                <div className="text-[11px] text-yellow-300 font-bold bg-slate-900 px-2 py-1 rounded border border-yellow-500/20">
+                                  📝 Phụ đề: {item.subtitle}
+                                </div>
+                              )}
+                            </div>
+
+                            <div className="md:col-span-5 space-y-1.5">
+                              <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1">
+                                <ImageIcon className="w-3 h-3 text-purple-400" />
+                                <span>Gợi ý cảnh quay điện ảnh:</span>
+                              </div>
+                              <p className="text-[11px] text-slate-300 italic bg-slate-900/90 p-2.5 rounded-lg border border-slate-800 leading-relaxed">
+                                {item.visual_description}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Ô CHỈNH SỬA TRỰC TIẾP LỜI THOẠI TOÀN BỘ (VOICEOVER TEXTAREA) */}
                 <div className="space-y-2">
-                  <label className="text-xs font-semibold uppercase tracking-wider text-slate-300 flex items-center justify-between">
-                    <span className="flex items-center gap-1.5 text-amber-400">
-                      <Edit3 className="w-3.5 h-3.5" /> Lời thoại lồng tiếng (Bấm vào để tự gõ chỉnh sửa trực tiếp):
-                    </span>
-                    <span className="text-[11px] text-slate-500 font-normal">Chỉnh sửa tự do</span>
-                  </label>
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-semibold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
+                      <span className="flex items-center gap-1.5 text-amber-400">
+                        <Edit3 className="w-3.5 h-3.5" /> Lời thoại lồng tiếng hoàn chỉnh (Bấm vào để tự sửa từng chữ):
+                      </span>
+                    </label>
+                    <div className="flex items-center gap-2">
+                      {draftScript.voiceover_with_cues && (
+                        <button
+                          type="button"
+                          onClick={() => setShowVoiceoverWithCues(!showVoiceoverWithCues)}
+                          className="text-[11px] text-purple-400 hover:text-purple-300 underline font-medium"
+                        >
+                          {showVoiceoverWithCues ? "Ẩn ghi chú diễn cảm" : "Xem chỉ dẫn diễn cảm [Ngắt nhịp...]"}
+                        </button>
+                      )}
+                      <span className="text-[11px] text-slate-400 font-mono bg-slate-950 px-2 py-0.5 rounded border border-slate-800">
+                        {userEditedVoiceover.trim() ? userEditedVoiceover.trim().split(/\s+/).length : 0} từ (~{((userEditedVoiceover.trim() ? userEditedVoiceover.trim().split(/\s+/).length : 0) / 2.55).toFixed(1)}s)
+                      </span>
+                    </div>
+                  </div>
+
+                  {showVoiceoverWithCues && draftScript.voiceover_with_cues && (
+                    <div className="p-3 bg-purple-950/20 border border-purple-500/30 rounded-xl text-xs text-purple-200 leading-relaxed font-mono">
+                      <div className="text-[10px] font-bold uppercase text-purple-400 mb-1">
+                        Bản mẫu kịch bản có lồng chỉ dẫn ngữ điệu & ngắt nhịp:
+                      </div>
+                      {draftScript.voiceover_with_cues}
+                    </div>
+                  )}
+
                   <textarea
                     value={userEditedVoiceover}
                     onChange={(e) => setUserEditedVoiceover(e.target.value)}
                     rows={4}
                     className="w-full bg-slate-950 border border-amber-500/40 rounded-xl p-3.5 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-amber-500 transition-all leading-relaxed font-sans"
+                    placeholder="Nhập hoặc chỉnh sửa toàn bộ lời thoại sẽ được lồng tiếng..."
                   />
                 </div>
 
@@ -758,28 +932,34 @@ export default function Home() {
                   </div>
                 </div>
 
+                {/* FEEDBACK & VIẾT LẠI */}
                 <div className="p-4 bg-slate-950/90 rounded-xl border border-purple-500/30 space-y-3">
-                  <label className="text-xs font-semibold uppercase tracking-wider text-purple-300 flex items-center gap-1.5">
-                    <MessageSquareText className="w-3.5 h-3.5 text-purple-400" /> Bạn muốn AI viết lại? Nhập Feedback tại đây:
-                  </label>
-                  <div className="flex gap-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-semibold uppercase tracking-wider text-purple-300 flex items-center gap-1.5">
+                      <MessageSquareText className="w-3.5 h-3.5 text-purple-400" /> Bạn muốn AI viết lại kịch bản? Nhập Feedback:
+                    </label>
+                    <span className="text-[11px] text-slate-400">
+                      Áp dụng cho thời lượng <strong>{targetSeconds}s</strong>
+                    </span>
+                  </div>
+                  <div className="flex flex-col sm:flex-row gap-2">
                     <input
                       type="text"
                       value={feedbackPrompt}
                       onChange={(e) => setFeedbackPrompt(e.target.value)}
-                      placeholder="Ví dụ: 'Hãy làm câu kết tăm tối hơn', 'Đổi lời thoại sang giọng điệu sắc lạnh hơn', 'Bớt từ lại'..."
+                      placeholder="VD: 'Thêm cú twist giật gân ở đoạn kết', 'Làm giọng điệu sắc lạnh hơn', 'Mô tả hình ảnh rùng rợn hơn'..."
                       className="flex-1 bg-slate-900 border border-slate-700/80 rounded-xl px-3.5 py-2.5 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-purple-500"
                     />
                     <button
                       type="button"
                       onClick={handleReviseScript}
                       disabled={isRevising || !feedbackPrompt.trim()}
-                      className="px-4 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white text-xs font-semibold transition-all flex items-center gap-1.5 shrink-0"
+                      className="px-5 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white text-xs font-semibold transition-all flex items-center justify-center gap-1.5 shrink-0 shadow-md"
                     >
                       {isRevising ? (
                         <>
                           <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                          <span>Đang sửa...</span>
+                          <span>Đang viết lại kịch bản...</span>
                         </>
                       ) : (
                         <>
