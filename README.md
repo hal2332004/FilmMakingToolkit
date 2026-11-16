@@ -59,3 +59,5 @@ ELEVENLABS_API_KEY=sk_...
 1. **Lên kịch bản & Sửa feedback**: Sử dụng GPT-4o-mini siêu rẻ (~$0.0001 mỗi lần). Bạn có thể sửa đổi và tạo lại kịch bản thoải mái mà không lo tốn tiền.
 2. **Hình ảnh**: Sử dụng `gpt-image-1-mini` thế hệ mới nhanh và tối ưu chi phí. Khuyên dùng **1 cảnh** (ảnh zoom cinematic) để giữ chi phí mỗi video ở mức ~**$0.08**.
 3. **Hiệu ứng âm thanh & Render**: Xử lý 100% bằng **FFmpeg trực tiếp trên máy tính của bạn** (hoàn toàn miễn phí, không tốn credit).
+
+Test co-author
